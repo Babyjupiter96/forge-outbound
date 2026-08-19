@@ -33,9 +33,9 @@ Every stage reads/writes its own table columns rather than running as one atomic
 
 ## Domain setup — read this before sending anything
 
-**Use a dedicated domain, not weforgedigitalai.com directly.** If a cold-sending domain's reputation degrades (a bad subject line, a spam-trap hit, whatever), you don't want that bleeding into the deliverability of Forge's actual business email. A cheap secondary domain (~$10-15/year, e.g. `forgedigitalai.email` or similar) fully isolates that risk. A *subdomain* of weforgedigitalai.com is a middle option — some isolation, cheaper (free), but not as clean; a fully separate domain is the safer practical choice per the spec's own ask, and what's assumed below.
+**Using a subdomain of weforgedigitalai.com (`outreach.weforgedigitalai.com`), not a separate domain.** Decided 2026-08-19: a fully separate domain gives cleaner sending-reputation isolation, but costs ~$10-15/year; a subdomain is free and reuses a domain already controlled, at the cost of slightly less isolation if the outbound reputation ever takes a hit. Chosen deliberately for the free option — revisit only if deliverability problems actually show up in practice.
 
-You'll need, on that domain:
+You'll need, on that subdomain:
 1. **SPF, DKIM, DMARC records** — Resend's dashboard gives you the exact DNS records to add once you connect the domain there.
 2. **A real receiving inbox** at the same address used for `OUTBOUND_REPLY_TO` — Resend only sends, it doesn't receive, and reply detection needs somewhere real to poll. **Recommended: Zoho Mail's free tier** (free for 1 custom domain, up to 5 users) — set it up, then use its IMAP credentials for `IMAP_HOST`/`IMAP_USER`/`IMAP_PASSWORD` in `.env`.
 3. **Warm-up**: don't start at `DAILY_SEND_CAP=15` on day one of a brand-new domain — see Scaling below.
@@ -47,9 +47,9 @@ You'll need, on that domain:
 | [Google Cloud Console](https://console.cloud.google.com) | Places API (New) | Free tier, but needs a billing account attached |
 | [Apollo.io](https://apollo.io) | Contact enrichment | Free |
 | [Resend](https://resend.com) | Sending | Free (3,000/mo) |
-| [Zoho Mail](https://zoho.com/mail) | Receiving replies on the outbound domain | Free |
-| A domain registrar (Namecheap, Cloudflare, etc.) | The dedicated outbound domain | ~$10-15/yr |
-| [Supabase](https://supabase.com) | Database | Free |
+| [Zoho Mail](https://zoho.com/mail) | Receiving replies on `outreach.weforgedigitalai.com` | Free |
+| ~~Domain registrar~~ | Not needed — using a free subdomain of weforgedigitalai.com instead | — |
+| [Supabase](https://supabase.com) | Database | Free — **done**, see below |
 
 Once you've got API keys from each, hand them to me and I'll fill in `.env`/Vercel env vars and do the deploy — same pattern as the SDR chatbot project.
 
@@ -59,7 +59,7 @@ Once you've got API keys from each, hand them to me and I'll fill in `.env`/Verc
 - Apollo free tier → roughly enough decision-maker lookups for the 10-25/day target volume
 - Resend free tier → exactly matches a 15/day starting cap (100/day ceiling)
 - Supabase, Zoho Mail free tiers → no realistic ceiling at this scale
-- **The only real cost is the domain** (~$10-15/year) — everything else genuinely runs at $0/month at MVP volume.
+- Using a subdomain of weforgedigitalai.com instead of a separate purchased domain → **genuinely $0/month, no exceptions, at MVP volume.**
 
 ## Paid upgrade path
 
