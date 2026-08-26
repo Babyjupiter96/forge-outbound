@@ -1,6 +1,6 @@
 # Forge Outbound — automated HVAC cold-email pipeline
 
-Finds HVAC businesses via Google Places → dedupes → finds a decision-maker + verified email via Apollo → scores the lead → researches their website → writes a personalized email with AI → sends it → follows up automatically → stops on reply/bounce/unsubscribe. Runs once a day via Vercel Cron.
+Finds HVAC businesses via Google Places → dedupes → finds a decision-maker + verified email via Hunter.io → scores the lead → researches their website → writes a personalized email with AI → sends it → follows up automatically → stops on reply/bounce/unsubscribe. Runs once a day via Vercel Cron.
 
 Full requirements/reasoning behind every decision here live in Claude's memory (`project_forge_outbound_leadgen.md`) if this file ever needs re-deriving.
 
@@ -11,7 +11,7 @@ Google Places (Text Search, cheap fields)
   -> filter to real HVAC candidates
   -> Google Places (Details, phone/website/rating — only for candidates)
   -> dedupe (domain / phone / address) -> Supabase `companies`
-  -> Apollo (decision-maker + verified email) -> `contacts`
+  -> Hunter.io (decision-maker + verified email) -> `contacts`
   -> deterministic scoring (0-100) -> gate at 60
   -> website research (plain fetch + heuristics, no fabrication risk)
   -> OpenAI (structured output, evidence-only) -> `research`
@@ -26,7 +26,7 @@ Every stage reads/writes its own table columns rather than running as one atomic
 ## Why these specific tools (the free/cheap-first reasoning)
 
 - **Google Places, not Yelp**: Yelp Fusion has no free tier ($7.99+/1,000 calls) *and* its ToS prohibits building a persistent competing business database and requires purging cached data within 24 hours — directly incompatible with the permanent `companies` table this needs. Google Places gives 5,000 free Text Search calls/month, which is why sourcing is built as a two-stage fetch (cheap Basic Data search, then Details only for real candidates) — that's the actual cost control, not a detail.
-- **Apollo over Hunter**: Apollo's free tier is meaningfully more generous for both finding a decision-maker and revealing their email.
+- **Hunter over Apollo**: Apollo's free tier turned out to block API access entirely — confirmed directly against a live key ("not accessible, even with a master key"), not just a docs read. Hunter's free tier (50 credits/mo, 1 credit = 1 email found) does include real API access, so it's the actual $0 option, even though its free volume is lower than Apollo was assumed to offer.
 - **Resend over Amazon SES**: SES will get your account suspended for unsolicited/cold email — it's built for transactional mail only. Resend's free tier (3,000/mo, 100/day) matches the 10-25/day starting volume.
 - **Supabase**: per your stack preference, plain Postgres, free tier is plenty at this scale.
 - **No dedicated "cold email SaaS"** (Instantly/Smartlead/etc.) — deliberately avoided per your "don't recommend unnecessary SaaS tools" instruction. Revisit only if Resend's deliverability genuinely proves insufficient at higher volume.
@@ -45,7 +45,7 @@ You'll need, on that subdomain:
 | Service | What for | Plan |
 |---|---|---|
 | [Google Cloud Console](https://console.cloud.google.com) | Places API (New) | Free tier, but needs a billing account attached |
-| [Apollo.io](https://apollo.io) | Contact enrichment | Free |
+| [Hunter.io](https://hunter.io) | Contact enrichment | Free (50 credits/mo) |
 | [Resend](https://resend.com) | Sending | Free (3,000/mo) |
 | [Zoho Mail](https://zoho.com/mail) | Receiving replies on `outreach.weforgedigitalai.com` | Free |
 | ~~Domain registrar~~ | Not needed — using a free subdomain of weforgedigitalai.com instead | — |
@@ -56,7 +56,7 @@ Once you've got API keys from each, hand them to me and I'll fill in `.env`/Verc
 ## Free MVP — what $0 actually gets you
 
 - 5,000 Google Places Text Search calls/month → far more than enough to search 3 cities × 4-5 keywords daily without hitting the cap
-- Apollo free tier → roughly enough decision-maker lookups for the 10-25/day target volume
+- Hunter free tier → 50 credits/mo, enough for roughly 2/day sustained (or a burst of ~50 the first month) — the real cap on free-tier volume, see Paid upgrade path below
 - Resend free tier → exactly matches a 15/day starting cap (100/day ceiling)
 - Supabase, Zoho Mail free tiers → no realistic ceiling at this scale
 - Using a subdomain of weforgedigitalai.com instead of a separate purchased domain → **genuinely $0/month, no exceptions, at MVP volume.**
@@ -65,7 +65,7 @@ Once you've got API keys from each, hand them to me and I'll fill in `.env`/Verc
 
 Per your stated priority order (lead quality → contact accuracy → email verification → deliverability → automation → scale):
 
-- **$25/mo**: Apollo paid tier (more/better contact data, real email verification instead of relying on Apollo's own status field) — directly improves contact accuracy and reduces bounce risk, the two things that most protect deliverability long-term.
+- **$25/mo-ish**: Hunter's Starter plan ($34/mo, ~2,000 credits/mo) — the real unlock once the 50/mo free cap is the bottleneck, not a "nice to have." Directly improves contact accuracy and lets volume scale, which is what most protects deliverability long-term.
 - **$50/mo**: add Resend's paid tier (higher daily send limit, needed once you're consistently past 100/day) + a dedicated email-verification service (NeverBounce or ZeroBounce) as a second check before every send — squeezes bounce rate further, which is the single biggest lever on domain reputation.
 - **$100/mo**: a second warmed-up sending domain/inbox (splits volume, reduces per-domain velocity, standard practice once you're pushing toward 250/day) + Google Places budget headroom if you expand past a handful of cities.
 
@@ -98,6 +98,6 @@ Never just raise `DAILY_SEND_CAP`. Volume and infrastructure need to grow togeth
 - **10-25/day** (weeks 1-2): the dedicated domain warming up, one Resend account, `DAILY_SEND_CAP=15`.
 - **50/day** (once bounce rate is consistently low and you've had real replies, not just silence): raise the cap gradually — roughly +5/day per week, not a jump.
 - **100/day**: you're at Resend's free daily ceiling — this is the natural point to move to Resend's paid tier and add a real verification service (see $50/mo tier above), since bounce rate matters more as volume grows.
-- **250/day**: needs a second sending domain/inbox splitting volume, so no single domain's velocity looks anomalous. Also revisit the Google Places search breadth (more cities) and Apollo volume at this point.
+- **250/day**: needs a second sending domain/inbox splitting volume, so no single domain's velocity looks anomalous. Also revisit the Google Places search breadth (more cities) and Hunter plan tier at this point.
 
 Reputation, not sending capacity, is the actual bottleneck at every stage — the send cap should always trail slightly behind what the domain has proven it can handle, not lead it.

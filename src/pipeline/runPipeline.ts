@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { searchHvacBusinesses } from "../sources/googlePlaces.js";
 import { normalizeDomain, normalizePhone, normalizeAddress } from "../dedup.js";
-import { findDecisionMaker } from "../enrichment/apollo.js";
+import { findDecisionMaker } from "../enrichment/hunter.js";
 import { scoreLead, isEligibleForAutoContact } from "../scoring.js";
 import { researchWebsite } from "../research.js";
 import { generatePersonalization } from "../ai/prompt.js";
@@ -107,7 +107,7 @@ async function enrichNewCompanies(): Promise<void> {
       email_verification_status: found.verified ? "valid" : "risky",
       linkedin_url: found.linkedinUrl,
       confidence_score: found.confidenceScore,
-      enrichment_source: "apollo",
+      enrichment_source: "hunter",
     });
     await db.from("companies").update({ status: "enriching" }).eq("id", company.id);
   }

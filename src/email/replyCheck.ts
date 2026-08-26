@@ -31,9 +31,16 @@ export async function checkForRepliesAndUnsubscribes(): Promise<{ repliesFound: 
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      // Only unseen messages — each message is marked seen as it's
-      // processed, so a message is never double-counted across runs.
-      for await (const message of client.fetch({ seen: false }, { envelope: true, source: true })) {
+      // Only unseen messages from the last 3 days — a reply to a daily
+      // campaign is always recent, and this inbox is the user's real
+      // personal Gmail (ImprovMX forwards here), which accumulates
+      // unrelated unread mail that has nothing to do with outreach.
+      // Without the `since` bound this scans the ENTIRE unseen backlog
+      // every run — confirmed to hang for 40+ minutes against a real
+      // inbox with old unread promotional mail. Each message is marked
+      // seen as it's processed, so nothing is double-counted anyway.
+      const since = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      for await (const message of client.fetch({ seen: false, since }, { envelope: true, source: true })) {
         if (!message.source) continue;
         const parsed: ParsedMail = await simpleParser(message.source, {});
         const fromAddress = parsed.from?.value[0]?.address?.toLowerCase();
