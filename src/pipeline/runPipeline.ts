@@ -49,6 +49,14 @@ async function sourceNewLeads(): Promise<number> {
       const phoneNormalized = normalizePhone(listing.phone);
       const addressNormalized = normalizeAddress(listing.address);
 
+      // `domain` is the real primary dedup key (see schema notes) — the
+      // same business often surfaces under a different google_place_id
+      // across overlapping city/keyword searches. Conflict on domain
+      // when there is one, falling back to google_place_id only for
+      // domain-less listings, so this hits a clean ON CONFLICT DO
+      // NOTHING instead of a raw unique-violation against the separate
+      // `companies_domain_key` constraint (confirmed happening in
+      // production Postgres logs before this fix).
       const { error } = await db.from("companies").upsert(
         {
           name: listing.name,
@@ -68,7 +76,7 @@ async function sourceNewLeads(): Promise<number> {
           source: "google_places",
           status: "new",
         },
-        { onConflict: "google_place_id", ignoreDuplicates: true },
+        { onConflict: domain ? "domain" : "google_place_id", ignoreDuplicates: true },
       );
       if (!error) ingested++;
     }
