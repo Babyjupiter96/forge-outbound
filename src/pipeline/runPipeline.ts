@@ -11,7 +11,13 @@ import { checkForRepliesAndUnsubscribes } from "../email/replyCheck.js";
 import type { Company, Contact } from "../types.js";
 
 const DAILY_SEND_CAP = Number(process.env.DAILY_SEND_CAP ?? "15");
-const NEW_SEARCHES_PER_RUN = 3; // how many (city, keyword) combos to spend Places API calls on per day
+// How many (city, keyword) combos to search per day. Was 3 — far too
+// conservative against Google's real 5,000 free Text Search calls/mo
+// (166/day allowed). At 3/day, a small city/keyword list exhausts its
+// unique businesses within ~2-3 days and every subsequent run finds
+// nothing new to enrich/send (confirmed happening in production
+// 2026-08-28/29 — searches ran fine, zero new companies resulted).
+const NEW_SEARCHES_PER_RUN = 10;
 
 // ---------------------------------------------------------------------------
 // Phase 1: source new leads from Google Places, dedup, upsert as 'new'
