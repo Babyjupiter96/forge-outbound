@@ -47,6 +47,24 @@ interface DecisionMakerResult {
   verified: boolean;
 }
 
+/**
+ * A Hunter call that failed before it could actually check the domain —
+ * quota exhaustion (429), an auth problem, a 5xx, a network error. This
+ * is NOT the same fact as "we checked and there's no email," and callers
+ * must not treat it as one: a company hit during an outage should stay
+ * eligible for enrichment on a future run, not get permanently marked
+ * no_contact_found for a reason that had nothing to do with the company.
+ */
+export class HunterUnavailableError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HunterUnavailableError";
+  }
+}
+
 function rankByTitlePriority(emails: HunterEmail[]): HunterEmail[] {
   return [...emails].sort((a, b) => {
     const aRank = TITLE_PRIORITY.findIndex((t) => a.position?.toLowerCase().includes(t));
@@ -59,18 +77,27 @@ function rankByTitlePriority(emails: HunterEmail[]): HunterEmail[] {
 
 /**
  * Finds the best decision-maker for a company by domain. Returns null
- * rather than a guessed/fabricated contact if nothing usable is found —
- * callers must treat null as "no_contact_found", never fill in a guess.
+ * only for a genuine negative result (Hunter answered, no usable
+ * personal email) — never a guessed/fabricated contact. A failed call
+ * (quota, auth, network, 5xx) throws HunterUnavailableError instead of
+ * returning null, so it can't be silently mistaken for "no email found."
  */
 export async function findDecisionMaker(domain: string, companyName: string): Promise<DecisionMakerResult | null> {
   if (!API_KEY) throw new Error("HUNTER_API_KEY not set");
 
   const url = `${BASE_URL}/domain-search?domain=${encodeURIComponent(domain)}&api_key=${API_KEY}`;
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new HunterUnavailableError(0, `Hunter domain search network error for ${companyName} (${domain}): ${err}`);
+  }
 
   if (!res.ok) {
-    console.error(`Hunter domain search failed for ${companyName} (${domain}): ${res.status}`);
-    return null;
+    throw new HunterUnavailableError(
+      res.status,
+      `Hunter domain search failed for ${companyName} (${domain}): ${res.status}`,
+    );
   }
 
   const data = (await res.json()) as { data?: { emails?: HunterEmail[] } };

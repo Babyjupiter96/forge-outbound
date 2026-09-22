@@ -6,15 +6,16 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "run-pipeline": "tsx src/pipeline/runPipeline.ts",
-    "db:migrate": "supabase db push"
+    "db:migrate": "supabase db push",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.2",
     "openai": "^4.77.0",
     "resend": "^4.0.1",
     "svix": "^1.42.0",
-    "imapflow": "^1.0.171",
-    "mailparser": "^3.7.2",
     "zod": "^3.24.0"
   },
   "devDependencies": {
@@ -22,6 +23,7 @@
     "@types/node": "^20.19.0",
     "@vercel/node": "^3.2.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.1"
   }
 }

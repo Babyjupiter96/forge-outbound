@@ -1,7 +1,7 @@
 import { db } from "../db.js";
 import { searchHvacBusinesses } from "../sources/googlePlaces.js";
 import { normalizeDomain, normalizePhone, normalizeAddress } from "../dedup.js";
-import { findDecisionMaker } from "../enrichment/hunter.js";
+import { findDecisionMaker, HunterUnavailableError } from "../enrichment/hunter.js";
 import { scoreLead, isEligibleForAutoContact } from "../scoring.js";
 import { researchWebsite } from "../research.js";
 import { generatePersonalization } from "../ai/prompt.js";
@@ -98,17 +98,38 @@ async function sourceNewLeads(): Promise<number> {
 // ---------------------------------------------------------------------------
 // Phase 2: enrich 'new' companies with a decision-maker contact
 // ---------------------------------------------------------------------------
-async function enrichNewCompanies(): Promise<void> {
+export async function enrichNewCompanies(): Promise<{ enriched: number; deferred: number }> {
   const { data: companies } = await db.from("companies").select("*").eq("status", "new").limit(25);
-  for (const company of (companies ?? []) as Company[]) {
+  const list = (companies ?? []) as Company[];
+  let enriched = 0;
+
+  for (const [index, company] of list.entries()) {
     if (!company.domain) {
       await db.from("companies").update({ status: "no_contact_found", status_reason: "No website/domain to enrich against" }).eq("id", company.id);
       continue;
     }
 
-    const found = await findDecisionMaker(company.domain, company.name);
+    let found;
+    try {
+      found = await findDecisionMaker(company.domain, company.name);
+    } catch (err) {
+      if (err instanceof HunterUnavailableError) {
+        // Not a real negative result — Hunter didn't actually answer
+        // (quota exhausted, auth, 5xx, network). Leave the company as
+        // 'new' so a future run retries it instead of marking it dead
+        // for a reason that had nothing to do with the company itself.
+        // Stop this run's enrichment loop too: if Hunter is down/out of
+        // credits for one company it almost certainly is for the rest,
+        // so further calls would just fail the same way and waste
+        // whatever credits (or time) remain.
+        console.warn(`Hunter unavailable (${err.status}) — deferring remaining enrichment to a future run: ${err.message}`);
+        return { enriched, deferred: list.length - index };
+      }
+      throw err;
+    }
+
     if (!found) {
-      await db.from("companies").update({ status: "no_contact_found", status_reason: "No decision-maker/email found via Apollo" }).eq("id", company.id);
+      await db.from("companies").update({ status: "no_contact_found", status_reason: "No decision-maker/email found via Hunter" }).eq("id", company.id);
       continue;
     }
 
@@ -124,7 +145,9 @@ async function enrichNewCompanies(): Promise<void> {
       enrichment_source: "hunter",
     });
     await db.from("companies").update({ status: "enriching" }).eq("id", company.id);
+    enriched++;
   }
+  return { enriched, deferred: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +299,8 @@ async function sendDueFollowUps(remainingSendBudget: number): Promise<number> {
 
 export interface PipelineRunSummary {
   leadsIngested: number;
+  leadsEnriched: number;
+  leadsDeferred: number;
   initialEmailsSent: number;
   followUpsSent: number;
   repliesDetected: number;
@@ -291,7 +316,7 @@ export interface PipelineRunSummary {
  */
 export async function runPipeline(): Promise<PipelineRunSummary> {
   const leadsIngested = await sourceNewLeads();
-  await enrichNewCompanies();
+  const { enriched: leadsEnriched, deferred: leadsDeferred } = await enrichNewCompanies();
   await scoreEnrichedCompanies();
 
   const initialEmailsSent = await researchAndSendInitial(DAILY_SEND_CAP);
@@ -301,6 +326,8 @@ export async function runPipeline(): Promise<PipelineRunSummary> {
 
   return {
     leadsIngested,
+    leadsEnriched,
+    leadsDeferred,
     initialEmailsSent,
     followUpsSent,
     repliesDetected: repliesFound,
